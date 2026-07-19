@@ -18,7 +18,6 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -31,7 +30,6 @@ if _PROJECT_ROOT not in sys.path:
 
 import config as cfg
 from system_monitor import monitor as sysmon
-from weather_forecaster import weather_aemet
 from price_watcher import price_watcher as pw
 from reminder import reminder as rmd
 from impulse_buy import wish as ibw
@@ -132,10 +130,6 @@ class DailyStats:
         # ---- Throttling ----
         throttled_events = [s for s in samples if s["throttled"] != "ok"]
 
-        # ---- Weather health checks ----
-        om_status = _check_open_meteo()
-        aemet_status = _check_aemet()
-
         # ---- Build report ----
         lines = []
         header = f"📊 Pi Daily Report — {day}"
@@ -192,9 +186,6 @@ class DailyStats:
         if sd_wear:
             label = "lifetime" if sd_wear["type"] == "lifetime" else "since boot"
             lines.append(f"💾 SD Wear · {sd_wear['total_gb']}GB ({label})")
-
-        # Weather
-        lines.append(f"🌤 Weather APIs · Open-Meteo {om_status} · AEMET {aemet_status}")
 
         # ---- Alerts section ----
         alerts = []
@@ -275,39 +266,6 @@ def _seconds_until_09_madrid() -> float:
     return _seconds_until(9, 0)
 
 
-def _check_open_meteo() -> str:
-    """Return ✅, ❌, or ⏭️ for Open-Meteo."""
-    try:
-        url = "https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude": cfg.WEATHER_LAT,
-            "longitude": cfg.WEATHER_LON,
-            "hourly": "temperature_2m",
-            "forecast_days": 1,
-            "timezone": "Europe/Madrid",
-        }
-        resp = requests.get(url, params=params, timeout=10)
-        return "✅" if resp.status_code == 200 else "❌"
-    except Exception:
-        return "❌"
-
-
-def _check_aemet() -> str:
-    """Return ✅, ❌, or ⏭️ for AEMET (skipped if no key)."""
-    if not cfg.AEMET_API_KEY:
-        return "⏭️"
-    try:
-        # Request observation data for Zaragoza Aeropuerto station
-        url = (
-            f"https://opendata.aemet.es/opendata/api/observacion/convencional"
-            f"/datos/estacion/{cfg.AEMET_STATION}"
-        )
-        resp = requests.get(url, params={"api_key": cfg.AEMET_API_KEY}, timeout=10)
-        return "✅" if resp.status_code == 200 else "❌"
-    except Exception:
-        return "❌"
-
-
 def _read_sd_wear() -> dict | None:
     """Read SD card wear metrics.
 
@@ -350,19 +308,8 @@ async def sample_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     daily_stats.record(snap)
 
 
-async def morning_report_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Build and send the morning weather brief (09:00), then re-schedule."""
-    report = weather_aemet.format_morning_report()
-    if report:
-        await context.bot.send_message(
-            chat_id=ALLOWED_USER, text=report, parse_mode="Markdown"
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=ALLOWED_USER,
-            text="☀️ Good morning — AEMET data unavailable this morning.",
-        )
-    # Check for impulse buy wishes due for re-evaluation
+async def impulse_recheck_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Check for impulse buy wishes due for re-evaluation."""
     try:
         due = ibw.get_due_for_recheck()
         for w in due:
@@ -383,8 +330,6 @@ async def morning_report_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             log.info("Impulse re-check: asked about %d wish(es)", len(due))
     except Exception as exc:
         log.error("Impulse re-check failed: %s", exc)
-    # Re-schedule for tomorrow
-    _schedule_morning_report(context.job_queue)
 
 
 async def daily_report_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -459,11 +404,11 @@ def _schedule_sampling(job_queue) -> None:
     log.info("Daily stats sampling started (first in %.0fs, then every 30 min)", delay)
 
 
-def _schedule_morning_report(job_queue) -> None:
-    """Schedule a one-shot brief for 09:00 Europe/Madrid (re-schedules itself)."""
+def _schedule_impulse_recheck(job_queue) -> None:
+    """Schedule impulse buy re-check daily at 09:00."""
     delay = _seconds_until_09_madrid()
-    job_queue.run_once(morning_report_job, delay)
-    log.info("Morning report scheduled at 09:00 Madrid (in %.0fs)", delay)
+    job_queue.run_once(impulse_recheck_job, delay)
+    log.info("Impulse re-check scheduled at 09:00 Madrid (in %.0fs)", delay)
 
 
 def _schedule_daily_report(job_queue) -> None:
@@ -557,10 +502,10 @@ FINANCE_STEPS = [
 # ---------------------------------------------------------------------------
 MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
-        ["🌤 Weather", "📚 Study Log"],
-        ["💰 Finance Log", "🖥 Monitor"],
-        ["📈 Price Watch", "⏰ Reminder"],
-        ["💸 Impulse Buy", "📋 Commands"],
+        ["📚 Study Log", "💰 Finance Log"],
+        ["🖥 Monitor", "📈 Price Watch"],
+        ["⏰ Reminder", "💸 Impulse Buy"],
+        ["📋 Commands"],
     ],
     resize_keyboard=True,
 )
@@ -1414,21 +1359,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     session = _get_session(user_id)
     log.warning("handle_message text=%r mode=%s", text, session.get("mode"))
 
-    # ------- Weather (AEMET) -------
-    if text == "🌤 Weather":
-        await update.message.reply_text("⏳ Fetching AEMET data…")
-        try:
-            report = weather_aemet.format_ondemand()
-            if report:
-                await update.message.reply_text(report, parse_mode="Markdown")
-            else:
-                await update.message.reply_text(
-                    "❌ Could not fetch AEMET data. Check your API key and internet."
-                )
-        except Exception as exc:
-            await update.message.reply_text(f"❌ AEMET error: {exc}")
-        return
-
     # ------- Study Log -------
     if text == "📚 Study Log":
         session["mode"] = "study"
@@ -1797,7 +1727,7 @@ def main() -> None:
 
     # --- Schedule background jobs ---
     _schedule_sampling(app.job_queue)
-    _schedule_morning_report(app.job_queue)
+    _schedule_impulse_recheck(app.job_queue)
     _schedule_daily_report(app.job_queue)
     _schedule_price_watch(app.job_queue)
     _schedule_reminder_check(app.job_queue)

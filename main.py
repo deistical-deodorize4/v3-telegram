@@ -10,7 +10,6 @@ import os
 import sys
 from typing import Callable
 
-from weather_forecaster import forecast
 from study_tracker import study_log
 from finance_tracker import finance_log
 from system_monitor import monitor as sysmon
@@ -33,19 +32,17 @@ MENU = """
 ╔══════════════════════════════════╗
 ║     🍓 pi02w Hub                 ║
 ╠══════════════════════════════════╣
-║  1. 🌤   Weather Forecast         ║
-║  2. 📚  Study Tracker            ║
-║  3. 💰  Finance Tracker          ║
-║  4. 🖥  System Monitor           ║
+║  1. 📚  Study Tracker            ║
+║  2. 💰  Finance Tracker          ║
+║  3. 🖥  System Monitor           ║
 ║  0. 🚪  Exit                     ║
 ╚══════════════════════════════════╝
 """
 
 ACTIONS: dict[str, tuple[Callable, bool]] = {
-    "1": (forecast.main, True),
-    "2": (study_log.main, True),
-    "3": (finance_log.main, True),
-    "4": (_run_monitor, True),
+    "1": (study_log.main, True),
+    "2": (finance_log.main, True),
+    "3": (_run_monitor, True),
 }
 
 

@@ -1,11 +1,11 @@
 # pi02w Hub
 
-Telegram bot for a Raspberry Pi Zero 2W. Weather, chatbot, system monitor, study & finance logging.
+Telegram bot for a Raspberry Pi Zero 2W. System monitor, study & finance logging.
 
 ## Quick start
 
 ```bash
-git clone <repo-url> && cd pi02w-hub
+git clone <repo-url> && cd pi02w-telegram-hub
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -26,12 +26,10 @@ sudo systemctl start pi02w-hub
 | Variable | Description |
 |----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
-| `GEMINI_API_KEY` | Google AI Studio key |
 | `TELEGRAM_USER_ID` | Your Telegram user ID |
-| `AEMET_API_KEY` | (optional) AEMET OpenData key for Spanish weather |
 
 ## Commands
 
 - `/start` — show menu
 - `/daily` — pull today's hardware report
-- Weather, Chatbot, Study Log, Finance Log buttons in the menu
+- Study Log, Finance Log buttons in the menu
